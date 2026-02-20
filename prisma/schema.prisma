@@ -1,0 +1,313 @@
+generator client {
+  provider = "prisma-client"
+  output  = "../src/generated/prisma"
+  moduleFormat = "cjs"
+
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum WorkMode {
+  REMOTE
+  HYBRID
+  ONSITE
+}
+
+enum ApplicationStatus {
+  DRAFT
+  APPLIED
+  IN_PROGRESS
+  INTERVIEWING
+  OFFER
+  REJECTED
+  GHOSTED
+  CLOSED
+}
+
+enum EventType {
+  APPLIED
+  EMAIL_RECEIVED
+  FOLLOW_UP_SENT
+  PHONE_SCREEN
+  TECH_INTERVIEW
+  ONSITE
+  OFFER_RECEIVED
+  REJECTED
+  NOTE
+  SYSTEM_ALERT
+}
+
+enum ContactRole {
+  RECRUITER
+  HIRING_MANAGER
+  EMPLOYEE_REFERRAL
+  OTHER
+}
+
+enum OutreachType {
+  CONNECT
+  FOLLOW_UP
+  THANK_YOU
+}
+
+enum ReminderType {
+  FOLLOW_UP
+  CHECK_IN
+  INTERVIEW_PREP
+  CUSTOM
+}
+
+enum DocumentType {
+  RESUME
+  COVER_LETTER
+  JOB_DESCRIPTION
+  OTHER
+}
+
+model User {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  fullName  String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  resumeVersions ResumeVersion[]
+  applications   Application[]
+  templates      Template[]
+  reminders      Reminder[]
+  starStories    StarStory[]
+
+  contacts Contact[]
+}
+
+model ResumeVersion {
+  id         String   @id @default(cuid())
+  userId     String
+  name       String
+  targetRole String?
+  focusTags  String[] @default([])
+  isPrimary  Boolean  @default(false)
+
+  fileUrl  String?
+  fileName String?
+  fileSize Int?
+  mimeType String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User          @relation(fields: [userId], references: [id])
+  usedIn Application[] @relation("ResumeUsedIn")
+}
+
+model Application {
+  id     String @id @default(cuid())
+  userId String
+
+  companyName    String
+  companyWebsite String?
+  industry       String?
+
+  jobTitle   String
+  level      String?
+  department String?
+
+  workMode      WorkMode
+  locationLabel String? // "SF", "Remote (US)", etc.
+  source        String? // "LinkedIn", "Indeed", "Referral"
+  jobUrl        String?
+
+  salaryMin        Int?
+  salaryMax        Int?
+  salaryCurrency   String? // "USD"
+  salaryConfidence String? // "HIGH" | "LOW" (si lo quieres como string simple)
+
+  status     ApplicationStatus @default(DRAFT)
+  appliedAt  DateTime?
+  deadlineAt DateTime?
+
+  jdRaw        String? // texto pegado
+  jdParsedJson Json? // resultado del parser AI (skills, keywords, etc.)
+
+  resumeUsedId   String?
+  coverLetterUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user       User           @relation(fields: [userId], references: [id])
+  resumeUsed ResumeVersion? @relation("ResumeUsedIn", fields: [resumeUsedId], references: [id])
+
+  events    ApplicationEvent[]
+  documents Document[]
+  contacts  ApplicationContact[]
+  outreach  OutreachMessage[]
+  reminders Reminder[]
+  insights  Insight?
+  prepTasks PrepTask[]
+}
+
+model ApplicationEvent {
+  id            String    @id @default(cuid())
+  applicationId String
+  type          EventType
+  title         String
+  body          String?
+  happenedAt    DateTime  @default(now())
+  meta          Json?
+
+  application Application @relation(fields: [applicationId], references: [id])
+
+  @@index([applicationId, happenedAt])
+}
+
+model Contact {
+  id       String      @id @default(cuid())
+  userId   String
+  name     String
+  role     ContactRole
+  email    String?
+  linkedin String?
+  notes    String?
+
+  user User                 @relation(fields: [userId], references: [id])
+  apps ApplicationContact[]
+}
+
+model ApplicationContact {
+  id            String @id @default(cuid())
+  applicationId String
+  contactId     String
+
+  application Application @relation(fields: [applicationId], references: [id])
+  contact     Contact     @relation(fields: [contactId], references: [id])
+
+  @@unique([applicationId, contactId])
+}
+
+model OutreachMessage {
+  id            String       @id @default(cuid())
+  applicationId String
+  contactId     String?
+  type          OutreachType
+
+  subject   String?
+  body      String
+  channel   String? // "LinkedIn", "Email"
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id])
+}
+
+model Reminder {
+  id            String       @id @default(cuid())
+  userId        String
+  applicationId String?
+  type          ReminderType
+  title         String
+  dueAt         DateTime
+  doneAt        DateTime?
+  meta          Json?
+
+  user        User         @relation(fields: [userId], references: [id])
+  application Application? @relation(fields: [applicationId], references: [id])
+
+  @@index([userId, dueAt])
+}
+
+model Document {
+  id            String       @id @default(cuid())
+  applicationId String
+  type          DocumentType
+  fileUrl       String
+  fileName      String?
+  fileSize      Int?
+  mimeType      String?
+  createdAt     DateTime     @default(now())
+
+  application Application @relation(fields: [applicationId], references: [id])
+}
+
+model Insight {
+  id            String @id @default(cuid())
+  applicationId String @unique
+
+  atsScore        Int? // 0-100
+  keywordsFound   String[] @default([])
+  keywordsMissing String[] @default([])
+
+  frontendMatch Int? // 0-100
+  backendMatch  Int?
+  cloudMatch    Int?
+
+  stallPoint       String? // e.g. "Technical Interview"
+  rejectionReasons Json? // breakdown (tech gap, salary mismatch, etc.)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  application Application @relation(fields: [applicationId], references: [id])
+}
+
+model PrepTask {
+  id            String    @id @default(cuid())
+  applicationId String
+  title         String
+  description   String?
+  priority      String? // "HIGH" | "MEDIUM"
+  tag           String? // "TECH", "BEHAVIORAL"
+  doneAt        DateTime?
+  createdAt     DateTime  @default(now())
+
+  application Application    @relation(fields: [applicationId], references: [id])
+  resources   PrepResource[]
+}
+
+model PrepResource {
+  id         String  @id @default(cuid())
+  prepTaskId String
+  label      String?
+  url        String
+
+  task PrepTask @relation(fields: [prepTaskId], references: [id])
+}
+
+model StarStory {
+  id        String   @id @default(cuid())
+  userId    String
+  category  String // "Problem Solving", "Team Conflict", etc.
+  content   String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@index([userId, category])
+}
+
+model Template {
+  id        String   @id @default(cuid())
+  userId    String
+  name      String
+  category  String // "Recruitment"
+  content   String
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user      User               @relation(fields: [userId], references: [id])
+  variables TemplateVariable[]
+}
+
+model TemplateVariable {
+  id         String @id @default(cuid())
+  templateId String
+  key        String // "CandidateName", "Company", etc.
+
+  template Template @relation(fields: [templateId], references: [id])
+
+  @@unique([templateId, key])
+}
